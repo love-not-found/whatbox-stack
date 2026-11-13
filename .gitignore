@@ -1,3 +1,7 @@
 tmp/
 *.secret
 *.env
+searxng/
+slink/
+valkey/
+images/
