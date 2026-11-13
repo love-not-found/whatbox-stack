@@ -1,0 +1,72 @@
+name: Whatbox Stack
+
+services:
+
+  cloudflared:
+    image: "cloudflare/cloudflared:latest"
+    container_name: cloudflared-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: "${CLOUDFLARE_TUNNEL_TOKEN}"
+      TUNNEL_METRICS: "127.0.0.1:20241" # fixed address so the healthcheck can reach /ready
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  slink:
+    image: anirdev/slink:latest
+    container_name: slink
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    environment:
+      - TZ=${TZ}
+      - PORT=${SLINK_PORT}
+      - ORIGIN=${ORIGIN}
+      - USER_APPROVAL_REQUIRED=true
+      # User password requirements
+      - USER_PASSWORD_MIN_LENGTH=8
+      - USER_PASSWORD_REQUIREMENTS=15 # bitmask of requirements
+      # Maximum image size allowed to be uploaded (up to 1000M)
+      - IMAGE_MAX_SIZE=15M
+      # Image processing settings
+      - IMAGE_STRIP_EXIF_METADATA=true
+      - IMAGE_COMPRESSION_QUALITY=80
+      # Storage provider to use
+      - STORAGE_PROVIDER=local
+    volumes:
+      # Persist the database
+      - ./slink/data:/app/var/data
+      # Persist the uploaded images
+      - ./images:/app/slink/images
+    ports:
+      # Configurable host port; Slink listens on port 3000 inside the container.
+      - '${SLINK_PORT}:${SLINK_PORT}'
+
+  slink-import:
+    image: ghcr.io/love-not-found/slink-import:latest
+    container_name: slink-import
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      # Public address of your Slink instance (also sent as the Origin header)
+      SLINK_URL: ${ORIGIN}
+      # Password for the web UI
+      UI_PASSWORD: ${SLINK_IMPORTER_UI_PASSWORD}
+      # Keeps you logged in across restarts; any long random string (openssl rand -hex 32)
+      SESSION_SECRET: ${SESSION_SECRET}
+      PORT: ${SLINK_IMPORTER_PORT}
+      # Path the UI is served under; must match the nginx location
+      BASE_PATH: ${BASE_PATH:-/import}
+      WORKERS: ${WORKERS:-4}
+      DEFAULT_PUBLIC: ${DEFAULT_PUBLIC:-false}
+      DEFAULT_COLLECTION: ${DEFAULT_COLLECTION:-}
+      MAX_IMAGE_MB: ${MAX_IMAGE_MB:-50}
+    volumes:
+      - ./slink/importer:/data
+    ports:
+      - "${SLINK_IMPORTER_PORT}:${SLINK_IMPORTER_PORT}"
